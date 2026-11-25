@@ -95,7 +95,17 @@ def make_train_step(mesh, model_cfg: ModelConfig, train_cfg: TrainConfig, dtype,
             count = microbatches.shape[0]
             grads = jax.tree_util.tree_map(lambda x: jax.lax.pmean(x / count, "data"), grads)
             loss = jax.lax.pmean(jnp.mean(losses), "data")
-            new_params, new_opt, grad_norm = adamw_step(params, grads, opt, lr, train_cfg)
+            grads_finite = jnp.asarray(True)
+            for grad in grads.values():
+                grads_finite = grads_finite & jnp.all(jnp.isfinite(grad))
+
+            def apply_update(_):
+                return adamw_step(params, grads, opt, lr, train_cfg)
+
+            def skip_update(_):
+                return params, opt, jnp.asarray(jnp.inf, dtype=jnp.float32)
+
+            new_params, new_opt, grad_norm = jax.lax.cond(grads_finite, apply_update, skip_update, None)
             return new_params, new_opt, loss, grad_norm
 
         return parallel_step(params, opt, batch, lr)
@@ -436,8 +446,8 @@ def train(args):
                     )
                 else:
                     print(f"step {step}/{total_steps} loss={mean_loss:.4f}", flush=True)
-                if not math.isfinite(mean_loss):
-                    raise FloatingPointError(f"non-finite loss at step {step}")
+                if not math.isfinite(mean_loss) or not math.isfinite(float(grad_norm)):
+                    raise FloatingPointError(f"non-finite loss or gradient at step {step}")
                 loss_sum = 0.0
                 loss_count = 0
                 timer = time.time()
