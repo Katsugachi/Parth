@@ -66,7 +66,7 @@ def save_torch_checkpoint(model, optimizer, scaler, step, out_dir, model_cfg, hi
     base = os.path.join(out_dir, f"parth_step_{step:08d}")
     os.makedirs(out_dir, exist_ok=True)
     raw = model.module if hasattr(model, "module") else model
-    state = {"p:" + k: v.detach().cpu().contiguous() for k, v in raw.state_dict().items()}
+    state = {"p:" + k: v.detach().cpu().contiguous().clone() for k, v in raw.state_dict().items()}
     save_file(state, base + ".model.safetensors", metadata={"format": "pt"})
     torch.save({"optimizer": optimizer.state_dict(), "scaler": scaler.state_dict()}, base + ".optimizer.pt")
     with open(base + ".json", "w") as handle:
