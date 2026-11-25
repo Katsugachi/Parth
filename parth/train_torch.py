@@ -63,7 +63,7 @@ class TorchTokenLoader:
 
 
 def save_torch_checkpoint(model, optimizer, scaler, step, out_dir, model_cfg, history, stream_state):
-    base = os.path.join(out_dir, f"parth_step_{step:08d}")
+    base = os.path.join(out_dir, f"parth_torch_step_{step:08d}")
     os.makedirs(out_dir, exist_ok=True)
     raw = model.module if hasattr(model, "module") else model
     state = {"p:" + k: v.detach().cpu().contiguous().clone() for k, v in raw.state_dict().items()}
@@ -204,7 +204,7 @@ def train(args):
             loss_count = 0
             timer = time.time()
         if rank == 0 and step % train_cfg.save_every == 0:
-            base = os.path.join(OUTPUT_DIR, f"parth_step_{step:08d}")
+            base = os.path.join(OUTPUT_DIR, f"parth_torch_step_{step:08d}")
             save_torch_checkpoint(model, optimizer, scaler, step, OUTPUT_DIR, model_cfg, history, stream_state)
             upload_checkpoint(args.hf_checkpoint_repo, base, os.environ.get("HF_TOKEN"))
             prune_checkpoints(OUTPUT_DIR)
@@ -213,7 +213,7 @@ def train(args):
 
     if rank == 0:
         step_done = step if "step" in locals() else 0
-        base = os.path.join(OUTPUT_DIR, f"parth_step_{step_done:08d}")
+        base = os.path.join(OUTPUT_DIR, f"parth_torch_step_{step_done:08d}")
         save_torch_checkpoint(model, optimizer, scaler, step_done, OUTPUT_DIR, model_cfg, history, stream_state)
         upload_checkpoint(args.hf_checkpoint_repo, base, os.environ.get("HF_TOKEN"))
         raw = model.module if hasattr(model, "module") else model

@@ -335,10 +335,10 @@ def export_weights_only(out_dir: str, model_cfg: ModelConfig):
 
 
 def prune_checkpoints(out_dir: str, keep: int = 2):
-    checkpoints = sorted(glob.glob(os.path.join(out_dir, "parth_step_*.json")), key=os.path.basename)
+    checkpoints = sorted(glob.glob(os.path.join(out_dir, "parth*_step_*.json")), key=os.path.basename)
     for metadata_path in checkpoints[:-keep]:
         base = metadata_path[:-5]
-        for suffix in (".json", ".safetensors"):
+        for suffix in (".json", ".safetensors", ".model.safetensors", ".optimizer.pt"):
             try:
                 os.remove(base + suffix)
             except FileNotFoundError:
