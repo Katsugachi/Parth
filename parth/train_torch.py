@@ -163,7 +163,10 @@ def train(args):
     loss_count = 0
     stream_state = None
     for step in range(1, total_steps + 1):
-        if time.time() - started > train_cfg.max_hours * 3600:
+        timed_out = torch.tensor([int(time.time() - started > train_cfg.max_hours * 3600)], device=device)
+        if world_size > 1:
+            dist.all_reduce(timed_out, op=dist.ReduceOp.MAX)
+        if int(timed_out.item()):
             break
         batch, stream_state = loader.next_batch()
         batch = batch.to(device, non_blocking=True)
