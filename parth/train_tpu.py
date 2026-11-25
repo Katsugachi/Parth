@@ -67,7 +67,7 @@ def adamw_step(
     return new_params, {"step": step, "m": new_m, "v": new_v}, grad_norm
 
 
-def make_train_step(mesh, model_cfg: ModelConfig, train_cfg: TrainConfig, dtype):
+def make_train_step(mesh, model_cfg: ModelConfig, train_cfg: TrainConfig, dtype, loss_scale: float = 1.0):
     replicated = jax.sharding.PartitionSpec()
     data_sharded = jax.sharding.PartitionSpec("data")
 
@@ -83,10 +83,12 @@ def make_train_step(mesh, model_cfg: ModelConfig, train_cfg: TrainConfig, dtype)
             microbatches = batch[0]
 
             def accumulate(acc_grads, microbatch):
-                loss, grads = jax.value_and_grad(causal_lm_loss)(
-                    params, microbatch, model_cfg, dtype
-                )
-                return jax.tree_util.tree_map(jnp.add, acc_grads, grads), loss
+                def scaled_loss_fn(params):
+                    return causal_lm_loss(params, microbatch, model_cfg, dtype) * loss_scale
+
+                loss, scaled_grads = jax.value_and_grad(scaled_loss_fn)(params)
+                grads = jax.tree_util.tree_map(lambda g: g / loss_scale, scaled_grads)
+                return jax.tree_util.tree_map(jnp.add, acc_grads, grads), loss / loss_scale
 
             initial = jax.tree_util.tree_map(jnp.zeros_like, params)
             grads, losses = jax.lax.scan(accumulate, initial, microbatches)
@@ -346,8 +348,12 @@ def train(args):
     mesh = jax.sharding.Mesh(np.asarray(devices), ("data",))
     replicated = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
     sharded = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
-    dtype = jnp.bfloat16 if devices[0].platform == "tpu" else jnp.float32
-    print(f"jax {jax.__version__}: {devices[0].platform} {devices[0].device_kind}, {len(devices)} device(s)")
+    if args.dtype == "auto":
+        dtype = jnp.bfloat16 if devices[0].platform == "tpu" else jnp.float16 if devices[0].platform == "gpu" else jnp.float32
+    else:
+        dtype = getattr(jnp, args.dtype)
+    loss_scale = args.loss_scale if dtype == jnp.float16 else 1.0
+    print(f"jax {jax.__version__}: {devices[0].platform} {devices[0].device_kind}, {len(devices)} device(s), dtype={dtype}, loss_scale={loss_scale}")
     print(f"model: {model_cfg.parameter_count() / 1e6:.1f}M parameters, config={model_cfg.to_dict()}")
 
     tokens_per_step = train_cfg.tokens_per_step(model_cfg, len(devices))
@@ -389,7 +395,7 @@ def train(args):
         print("initializing from scratch")
 
     loader = TokenBatchLoader(tokenizer, model_cfg, train_cfg, len(devices), stream_state)
-    train_step = make_train_step(mesh, model_cfg, train_cfg, dtype)
+    train_step = make_train_step(mesh, model_cfg, train_cfg, dtype, loss_scale)
     monitor.phase = "compile"
     loss_sum = 0.0
     loss_count = 0
@@ -478,6 +484,8 @@ def parse_args():
     parser.add_argument("--max-hours", type=float, default=DEFAULT_TRAIN.max_hours)
     parser.add_argument("--download-data", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--download-workers", type=int, default=8)
+    parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
+    parser.add_argument("--loss-scale", type=float, default=256.0)
     return parser.parse_args()
 
 
