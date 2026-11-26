@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -45,6 +46,14 @@ def candidate_edits(state: dict[str, torch.Tensor], other: dict[str, torch.Tenso
                 yield f"interpolate_posttrain_{alpha}", interpolate(state, other, alpha), {"alpha": alpha}
 
 
+def accepts_edit(loss: float, baseline: float, tolerance: float) -> bool:
+    if not math.isfinite(loss):
+        return False
+    if not math.isfinite(baseline):
+        return True
+    return loss <= baseline + tolerance
+
+
 def clone_state(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     return {name: value.detach().cpu().clone() for name, value in state.items()}
 
@@ -72,10 +81,10 @@ def run_edits(model_path: str, output: str, validation_file: str | None = None, 
         candidate = {k: v.to(device=device, dtype=dtype) for k, v in candidate_cpu.items()}
         model.load_state_dict(candidate, strict=False)
         loss = validation_loss(model, tokenizer, texts, device)
-        accepted = loss <= best_loss + tolerance and loss < baseline
+        accepted = accepts_edit(loss, baseline, tolerance)
         trials.append({"name": name, "loss": loss, "accepted": accepted, **metadata})
         print(json.dumps(trials[-1]), flush=True)
-        if accepted and loss < best_loss:
+        if accepted and (not math.isfinite(best_loss) or loss < best_loss):
             best_loss = loss
             best_name = name
             best_state = clone_state(candidate)
