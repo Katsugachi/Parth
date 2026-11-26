@@ -112,6 +112,8 @@ def run_evaluation(model_path: str, output_dir: str, device: str = "cuda", batch
     ii = intelligence_index(scores) if all(k in scores for k in ["arc_easy", "arc_challenge", "hellaswag", "piqa"]) else None
     report = {
         "model": model_path,
+        "evaluation_mode": "limited-smoke" if limit is not None else "full",
+        "limit": limit,
         "scores": scores,
         "intelligence_index": ii,
         "method": {
@@ -121,7 +123,8 @@ def run_evaluation(model_path: str, output_dir: str, device: str = "cuda", batch
         },
         "details": details,
     }
-    (out / "open_slm_report.json").write_text(json.dumps(report, indent=2))
+    report_name = "open_slm_report.json" if limit is None else f"open_slm_report_limit_{limit}.json"
+    (out / report_name).write_text(json.dumps(report, indent=2))
     print(json.dumps(report["scores"], indent=2))
     print(f"Intelligence Index estimate: {ii:.2f}" if ii is not None else "incomplete evaluation")
     return report
