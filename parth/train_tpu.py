@@ -501,7 +501,7 @@ def parse_args():
     parser.add_argument("--download-workers", type=int, default=8)
     parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
     parser.add_argument("--loss-scale", type=float, default=256.0)
-    parser.add_argument("--require-tpu", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--require-tpu", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--min-tpu-devices", type=int, default=8)
     return parser.parse_args()
 
