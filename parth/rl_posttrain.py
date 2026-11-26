@@ -98,7 +98,7 @@ def grpo_epoch(model, tokenizer, step: int, args, device: str) -> dict:
             all_advantages.append((r - mean) / std)
     losses = completion_loss(model, tokenizer, all_prompts, all_completions, device)
     advantages = torch.tensor(all_advantages, dtype=torch.float32, device=device).clamp(-3, 3)
-    objective = -(advantages.detach() * losses).mean() + args.kl_coef * losses.mean()
+    objective = (advantages.detach() * losses).mean() + args.kl_coef * losses.mean()
     return {
         "loss": objective,
         "mean_reward": sum(rewards) / len(rewards),
