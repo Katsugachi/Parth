@@ -68,3 +68,32 @@ def test_time_compute_answer(model, tokenizer, prompt: str, samples: int = 8, ma
     candidates = sample_candidates(model, tokenizer, prompt, samples, max_new_tokens, device=device)
     answer, extracted, counts = self_consistent_answer(candidates)
     return {"answer": answer, "extracted": extracted, "vote_counts": counts, "candidates": candidates}
+
+
+def main():
+    import argparse
+    import json
+    from pathlib import Path
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    parser = argparse.ArgumentParser(description="Answer a prompt with Parth self-consistency test-time compute")
+    parser.add_argument("model")
+    parser.add_argument("prompt")
+    parser.add_argument("--output")
+    parser.add_argument("--samples", type=int, default=8)
+    parser.add_argument("--max-new-tokens", type=int, default=160)
+    args = parser.parse_args()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if device == "cuda" and torch.cuda.is_bf16_supported() else torch.float32
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype).to(device)
+    result = test_time_compute_answer(model, tokenizer, args.prompt, args.samples, args.max_new_tokens, device)
+    text = json.dumps(result, indent=2)
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(text)
+    print(text)
+
+
+if __name__ == "__main__":
+    main()
