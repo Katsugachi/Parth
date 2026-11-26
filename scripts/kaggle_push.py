@@ -24,7 +24,6 @@ def runner_source(commit: str, total_tokens: int, max_hours: float, micro_batch:
         "__PARTH_MAX_HOURS__": str(max_hours),
         "__PARTH_MICRO_BATCH__": str(micro_batch),
         "__PARTH_GRAD_ACCUM__": str(grad_accum),
-        "__PARTH_FALLBACK_GRAD_ACCUM__": str(grad_accum * 2 if micro_batch > 1 else grad_accum),
     }
     for key, value in replacements.items():
         if key not in source:
@@ -62,8 +61,8 @@ def main():
     parser.add_argument("--commit", default=None, help="full commit or ref pushed to GitHub; defaults to HEAD")
     parser.add_argument("--total-tokens", type=int, default=8_000_000_000)
     parser.add_argument("--max-hours", type=float, default=7.5)
-    parser.add_argument("--micro-batch", type=int, default=2)
-    parser.add_argument("--grad-accum", type=int, default=32)
+    parser.add_argument("--micro-batch", type=int, default=4)
+    parser.add_argument("--grad-accum", type=int, default=16)
     parser.add_argument("--kernel-source", action="append", default=[], help="prior kernel output to attach for checkpoint resume")
     parser.add_argument("--private", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")

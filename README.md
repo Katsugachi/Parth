@@ -1,6 +1,6 @@
 # Parth
 
-Parth is a from-scratch 337M-parameter small language model pipeline targeting the Open SLM leaderboard while remaining a useful lightweight chat assistant.
+Parth is a from-scratch 146M-parameter small language model pipeline targeting the Open SLM leaderboard while remaining a useful lightweight chat assistant.
 
 ## Components
 

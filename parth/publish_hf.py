@@ -26,7 +26,7 @@ tags:
 
 # Parth
 
-Parth is a 337M-parameter decoder-only language model pretrained from scratch as a light general chat assistant. It uses a Llama-style architecture with RoPE, RMSNorm, SwiGLU, grouped-query attention, and tied embeddings.
+Parth is a 146M-parameter decoder-only language model pretrained from scratch as a light general chat assistant. It uses a Llama-style architecture with RoPE, RMSNorm, SwiGLU, grouped-query attention, and tied embeddings.
 
 ## Training data
 

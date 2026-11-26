@@ -5,11 +5,11 @@ from typing import Any
 @dataclass(frozen=True)
 class ModelConfig:
     vocab_size: int = 32000
-    hidden_size: int = 1024
-    num_layers: int = 28
+    hidden_size: int = 640
+    num_layers: int = 29
     num_heads: int = 16
     num_kv_heads: int = 4
-    intermediate_size: int = 2688
+    intermediate_size: int = 1728
     seq_len: int = 1024
     rope_theta: float = 10000.0
     rms_norm_eps: float = 1e-5
@@ -43,7 +43,7 @@ class TrainConfig:
     micro_batch: int = 4
     grad_accum: int = 16
     total_tokens: int = 8_000_000_000
-    learning_rate: float = 4e-4
+    learning_rate: float = 6e-4
     min_lr_ratio: float = 0.1
     warmup_steps: int = 1000
     beta1: float = 0.9

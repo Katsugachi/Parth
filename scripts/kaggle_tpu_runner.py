@@ -69,11 +69,17 @@ def main():
     os.environ["PARTH_DATA_CACHE"] = "/tmp/parth_data_cache"
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
-    rc, log = stream_training(__PARTH_MICRO_BATCH__, __PARTH_GRAD_ACCUM__)
-    if rc and "TPU training requested" not in log and not glob.glob(OUT_DIR + "/parth_step_*.json"):
-        if "RESOURCE_EXHAUSTED" in log or "Out of memory" in log or "out of memory" in log:
-            print("micro-batch 2 exhausted device memory; retrying micro-batch 1", flush=True)
-            rc, log = stream_training(1, __PARTH_FALLBACK_GRAD_ACCUM__)
+    initial_micro_batch = __PARTH_MICRO_BATCH__
+    tokens_per_micro_step = initial_micro_batch * __PARTH_GRAD_ACCUM__
+    micro_batch = initial_micro_batch
+    while True:
+        grad_accum = max(1, tokens_per_micro_step // micro_batch)
+        rc, log = stream_training(micro_batch, grad_accum)
+        oom = "RESOURCE_EXHAUSTED" in log or "Out of memory" in log or "out of memory" in log
+        if not rc or "TPU training requested" in log or not oom or micro_batch == 1 or glob.glob(OUT_DIR + "/parth_step_*.json"):
+            break
+        micro_batch //= 2
+        print(f"device memory exhausted; retrying micro-batch {micro_batch}", flush=True)
     status = {
         "returncode": rc,
         "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
