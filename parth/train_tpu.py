@@ -393,6 +393,12 @@ def train(args):
     checkpoint = find_checkpoint(OUTPUT_DIR)
     if checkpoint:
         params, opt, metadata = load_checkpoint(checkpoint, replicated)
+        checkpoint_cfg = ModelConfig.from_dict(metadata["model_config"])
+        if checkpoint_cfg != model_cfg:
+            raise ValueError(
+                f"checkpoint architecture {checkpoint_cfg} does not match training architecture {model_cfg}; "
+                "remove the incompatible kernel input or use the commit that produced it"
+            )
         step = int(metadata["step"])
         stream_state = metadata.get("stream_state")
         history = metadata.get("history", {"train": [], "eval": []})
