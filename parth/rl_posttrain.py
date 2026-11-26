@@ -57,16 +57,24 @@ def reward_completion(completion: str, expected: str) -> float:
 
 
 def completion_loss(model, tokenizer, prompts: list[str], completions: list[str], device: str) -> torch.Tensor:
-    losses = []
+    rows = []
     for prompt, completion in zip(prompts, completions):
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
         completion_ids = tokenizer(completion + tokenizer.eos_token, add_special_tokens=False)["input_ids"]
-        ids = torch.tensor([prompt_ids + completion_ids], device=device)
-        labels = ids.clone()
-        labels[0, : len(prompt_ids)] = -100
-        out = model(input_ids=ids, labels=labels)
-        losses.append(out.loss)
-    return torch.stack(losses)
+        rows.append((prompt_ids, prompt_ids + completion_ids))
+    width = max(len(ids) for _, ids in rows)
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    input_ids = torch.full((len(rows), width), pad_id, dtype=torch.long, device=device)
+    labels = torch.full((len(rows), width), -100, dtype=torch.long, device=device)
+    attention_mask = torch.zeros((len(rows), width), dtype=torch.long, device=device)
+    for row, (prompt_ids, ids) in enumerate(rows):
+        input_ids[row, :len(ids)] = torch.tensor(ids, device=device)
+        labels[row, len(prompt_ids):len(ids)] = torch.tensor(ids[len(prompt_ids):], device=device)
+        attention_mask[row, :len(ids)] = 1
+    logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+    token_losses = F.cross_entropy(logits[:, :-1].transpose(1, 2), labels[:, 1:], reduction="none", ignore_index=-100)
+    mask = labels[:, 1:] != -100
+    return token_losses.sum(dim=1) / mask.sum(dim=1).clamp_min(1)
 
 
 def grpo_epoch(model, tokenizer, step: int, args, device: str) -> dict:
