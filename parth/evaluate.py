@@ -41,7 +41,7 @@ def metric_result(task_result: dict[str, Any]) -> float:
     raise KeyError(f"no accuracy metric in {task_result}")
 
 
-def run_lm_eval(model_path: str, output_dir: Path, device: str, batch_size: str) -> dict[str, float]:
+def run_lm_eval(model_path: str, output_dir: Path, device: str, batch_size: str, limit: int | None = None) -> dict[str, float]:
     from lm_eval import simple_evaluate
 
     results = simple_evaluate(
@@ -52,17 +52,23 @@ def run_lm_eval(model_path: str, output_dir: Path, device: str, batch_size: str)
         batch_size=batch_size,
         device=device,
         log_samples=False,
+        limit=limit,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "lm_eval_raw.json").write_text(json.dumps(results, indent=2, default=str))
     return {task: metric_result(results["results"][task]) for task in LEADERBOARD_TASKS}
 
 
-def run_arithmark3(model_path: str, work_dir: Path, device: str, batch_size: int) -> tuple[float, dict[str, Any]]:
+def run_arithmark3(model_path: str, work_dir: Path, device: str, batch_size: int, limit: int | None = None) -> tuple[float, dict[str, Any]]:
     data = work_dir / "arithmark-3.jsonl"
     script = work_dir / "bencharithmark-3.py"
     download(ARITHMARK3_URL, data)
     download(ARITHMARK3_SCRIPT_URL, script)
+    if limit is not None:
+        limited = work_dir / f"arithmark-3-limit-{limit}.jsonl"
+        lines = data.read_text().splitlines()[:limit]
+        limited.write_text("\n".join(lines) + "\n")
+        data = limited
     cmd = [
         sys.executable,
         str(script),
@@ -87,18 +93,19 @@ def run_arithmark3(model_path: str, work_dir: Path, device: str, batch_size: int
     return float(model_result.get("acc_norm", model_result.get("acc"))), result
 
 
-def run_evaluation(model_path: str, output_dir: str, device: str = "cuda", batch_size: str = "auto", skip_lm_eval: bool = False):
+def run_evaluation(model_path: str, output_dir: str, device: str = "cuda", batch_size: str = "auto", skip_lm_eval: bool = False, limit: int | None = None):
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     scores: dict[str, float] = {}
     details: dict[str, Any] = {}
     if not skip_lm_eval:
-        scores.update(run_lm_eval(model_path, out, device, batch_size))
+        scores.update(run_lm_eval(model_path, out, device, batch_size, limit))
     arith_score, arith_details = run_arithmark3(
         model_path,
         out,
         device if device in ("cpu", "cuda") else "cuda",
         8 if device == "cpu" else 32,
+        limit,
     )
     scores["arithmark3"] = arith_score
     details["arithmark3"] = arith_details
@@ -127,12 +134,13 @@ def parse_args():
     parser.add_argument("--device", default="cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
     parser.add_argument("--batch-size", default="auto")
     parser.add_argument("--skip-lm-eval", action="store_true")
+    parser.add_argument("--limit", type=int, default=None, help="smoke-test only: evaluate at most this many examples per task")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    run_evaluation(args.model, args.output_dir, args.device, args.batch_size, args.skip_lm_eval)
+    run_evaluation(args.model, args.output_dir, args.device, args.batch_size, args.skip_lm_eval, args.limit)
 
 
 if __name__ == "__main__":
