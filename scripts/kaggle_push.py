@@ -1,102 +1,85 @@
-"""Push a Parth training/probe notebook to Kaggle using the token-only MCP endpoint.
+"""Queue a batch TPU pretraining job on Kaggle.
 
-The public CLI currently drops custom TPU-VM docker images when enable_tpu=true;
-this script sends the image explicitly through Kaggle's MCP save_notebook API.
+The working API path is a script kernel with ``machine_shape=TpuV5E8`` and no
+custom docker image. Interactive sessions and docker-pinned TPU pushes can boot
+CPU-only; batch TPU sessions normally enter Kaggle's scarce-resource queue.
 """
 
 import argparse
 import json
 import os
-import requests
+from pathlib import Path
 import subprocess
+import tempfile
 
-MCP = "https://www.kaggle.com/mcp"
-TPUVM_IMAGE = "gcr.io/kaggle-private-byod/python-tpuvm@sha256:02e61fa3973e04ecbf03a3ba9c7f7bcf58f7684662c2029bd8033aea3b249ebd"
-
-
-def mcp_call(token: str, name: str, request: dict):
-    response = requests.post(
-        MCP,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "Authorization": "Bearer " + token.strip(),
-        },
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {"request": request}}},
-        timeout=180,
-    )
-    response.raise_for_status()
-    events = []
-    for line in response.text.splitlines():
-        if line.startswith("data: "):
-            events.append(json.loads(line[6:]))
-    if not events or events[0].get("result", {}).get("isError"):
-        raise RuntimeError(response.text[:2000])
-    return events[0]["result"]
+ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = ROOT / "scripts" / "kaggle_tpu_runner.py"
 
 
-def notebook_source(commit: str, total_tokens: int, max_hours: float, micro_batch: int, grad_accum: int, extra_args: str = "") -> str:
-    code = f'''import os, subprocess, sys, time
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-os.chdir("/kaggle/working")
-if not os.path.exists("Parth/.git"):
-    subprocess.run(["git", "clone", "--depth", "50", "https://github.com/Katsugachi/Parth.git"], check=True)
-os.chdir("Parth")
-subprocess.run(["git", "fetch", "--depth", "50", "origin", "{commit}"], check=False)
-subprocess.run(["git", "checkout", "{commit}"], check=True)
-print("commit", subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), flush=True)
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=True)
-cmd = [sys.executable, "-m", "parth.train_tpu", "--total-tokens", "{total_tokens}", "--max-hours", "{max_hours}", "--micro-batch", "{micro_batch}", "--grad-accum", "{grad_accum}"]
-extra = "{extra_args}".split()
-cmd.extend([x for x in extra if x])
-print("running", cmd, flush=True)
-subprocess.run(cmd, check=True)
-'''
-    notebook = {
-        "cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": code, "id": "train"}],
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python", "version": "3"},
-            "kaggle": {"accelerator": "tpuV5e8", "dataSources": [], "isInternetEnabled": True, "language": "python", "sourceType": "notebook", "isGpuEnabled": False},
-        },
-        "nbformat": 4,
-        "nbformat_minor": 5,
+def runner_source(commit: str, total_tokens: int, max_hours: float, micro_batch: int, grad_accum: int) -> str:
+    source = TEMPLATE.read_text()
+    replacements = {
+        "__PARTH_COMMIT__": commit,
+        "__PARTH_TOTAL_TOKENS__": str(total_tokens),
+        "__PARTH_MAX_HOURS__": str(max_hours),
+        "__PARTH_MICRO_BATCH__": str(micro_batch),
+        "__PARTH_GRAD_ACCUM__": str(grad_accum),
+        "__PARTH_FALLBACK_GRAD_ACCUM__": str(grad_accum * 2 if micro_batch > 1 else grad_accum),
     }
-    return json.dumps(notebook)
+    for key, value in replacements.items():
+        if key not in source:
+            raise RuntimeError(f"template placeholder missing: {key}")
+        source = source.replace(key, value)
+    return source
+
+
+def write_kernel(directory: Path, args, commit: str):
+    (directory / "parth_tpu_train.py").write_text(
+        runner_source(commit, args.total_tokens, args.max_hours, args.micro_batch, args.grad_accum)
+    )
+    metadata = {
+        "id": args.slug,
+        "title": args.title,
+        "code_file": "parth_tpu_train.py",
+        "language": "python",
+        "kernel_type": "script",
+        "is_private": "true" if args.private else "false",
+        "enable_gpu": "false",
+        "enable_internet": "true",
+        "machine_shape": "TpuV5E8",
+        "dataset_sources": [],
+        "competition_sources": [],
+        "kernel_sources": args.kernel_source,
+        "model_sources": [],
+    }
+    (directory / "kernel-metadata.json").write_text(json.dumps(metadata, indent=2))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--slug", default="katsugachi/parth-pretrain")
-    parser.add_argument("--title", default="Parth pretrain")
-    parser.add_argument("--commit", default=None)
-    parser.add_argument("--total-tokens", type=int, default=30_000_000)
-    parser.add_argument("--max-hours", type=float, default=0.7)
-    parser.add_argument("--micro-batch", type=int, default=4)
-    parser.add_argument("--grad-accum", type=int, default=16)
-    parser.add_argument("--extra-args", default="")
-    parser.add_argument("--timeout", type=int, default=39600)
+    parser.add_argument("--slug", default="katsugachi/parth-pretrain-tpu-v1")
+    parser.add_argument("--title", default="Parth pretrain TPU v1")
+    parser.add_argument("--commit", default=None, help="full commit or ref pushed to GitHub; defaults to HEAD")
+    parser.add_argument("--total-tokens", type=int, default=8_000_000_000)
+    parser.add_argument("--max-hours", type=float, default=7.5)
+    parser.add_argument("--micro-batch", type=int, default=2)
+    parser.add_argument("--grad-accum", type=int, default=32)
+    parser.add_argument("--kernel-source", action="append", default=[], help="prior kernel output to attach for checkpoint resume")
     parser.add_argument("--private", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    token = os.environ.get("KAGGLE_TOKEN") or os.environ.get("KAGGLE_JSON")
-    if not token:
-        raise RuntimeError("set KAGGLE_TOKEN")
-    commit = args.commit or subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    request = {
-        "slug": args.slug,
-        "newTitle": args.title,
-        "text": notebook_source(commit, args.total_tokens, args.max_hours, args.micro_batch, args.grad_accum, args.extra_args),
-        "language": "python",
-        "kernelType": "notebook",
-        "isPrivate": args.private,
-        "enableGpu": False,
-        "enableTpu": True,
-        "enableInternet": True,
-        "machineShape": "TpuV5E8",
-        "dockerImage": TPUVM_IMAGE,
-        "sessionTimeoutSeconds": args.timeout,
-    }
-    print(json.dumps(mcp_call(token, "save_notebook", request), indent=2)[:2000])
+    commit = args.commit or subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if args.dry_run:
+        directory = Path(tempfile.mkdtemp(prefix="parth-kaggle-dry-"))
+        write_kernel(directory, args, commit)
+        print(directory)
+        return
+    with tempfile.TemporaryDirectory(prefix="parth-kaggle-") as tmp:
+        directory = Path(tmp)
+        write_kernel(directory, args, commit)
+        kaggle = os.environ.get("KAGGLE_CLI", "kaggle")
+        subprocess.run([kaggle, "kernels", "push", "-p", str(directory)], check=True)
+        print(f"queued https://www.kaggle.com/code/{args.slug}")
 
 
 if __name__ == "__main__":
