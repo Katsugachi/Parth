@@ -38,8 +38,17 @@ def rescale_to_rms(state: dict[str, torch.Tensor], target_rms: float = 0.02, inc
 def sparsify_smallest(state: dict[str, torch.Tensor], fraction: float = 0.001) -> tuple[dict[str, torch.Tensor], int]:
     if not 0 <= fraction < 0.05:
         raise ValueError("fraction must be in [0, 0.05)")
-    weights = [x.flatten().abs() for n, x in state.items() if x.ndim >= 2 and "embed" not in n]
-    threshold = torch.quantile(torch.cat(weights).float(), fraction)
+    # torch.quantile rejects tensors above 2**24 elements. Estimate the threshold
+    # from a deterministic strided sample instead of concatenating all 300M+ weights.
+    samples = []
+    sample_budget = 4_000_000
+    mats = [x.flatten().abs().float() for n, x in state.items() if x.ndim >= 2 and "embed" not in n]
+    total = sum(x.numel() for x in mats)
+    for flat in mats:
+        take = max(1, min(flat.numel(), sample_budget * flat.numel() // max(total, 1)))
+        stride = max(1, flat.numel() // take)
+        samples.append(flat[::stride][:take])
+    threshold = torch.quantile(torch.cat(samples), fraction)
     edited = {}
     count = 0
     for name, tensor in state.items():
