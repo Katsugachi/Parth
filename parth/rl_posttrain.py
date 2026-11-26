@@ -32,13 +32,21 @@ def arithmetic_prompt(rng: random.Random) -> tuple[str, str]:
     return prompt, answer
 
 
+def cpu_prompt(rng: random.Random) -> tuple[str, str]:
+    instructions, result = arithmetic_program(rng.randint(0, 1_000_000))
+    listing = "\n".join(f"{pc}: {ins.op} {' '.join(map(str, ins.args))}".rstrip() for pc, ins in enumerate(instructions))
+    prompt = (
+        "Execute this tiny CPU program exactly. Track registers and memory, then end with 'Final answer: <number>'.\n"
+        f"Program:\n{listing}\nAssistant:"
+    )
+    return prompt, str(result)
+
+
 def reward_completion(completion: str, expected: str) -> float:
     extracted = extract_answer(completion)
     reward = 0.0
     if extracted == expected:
         reward += 1.0
-    elif extracted.lstrip("-") == expected.lstrip("-"):
-        reward += 0.5
     if "final answer" in completion.lower():
         reward += 0.1
     if len(completion) > 1200:
@@ -68,7 +76,7 @@ def grpo_epoch(model, tokenizer, step: int, args, device: str) -> dict:
     all_advantages: list[float] = []
     rewards = []
     for _ in range(args.problems_per_step):
-        prompt, expected = arithmetic_prompt(rng)
+        prompt, expected = cpu_prompt(rng) if rng.random() < 0.35 else arithmetic_prompt(rng)
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             output = model.generate(
@@ -98,7 +106,7 @@ def grpo_epoch(model, tokenizer, step: int, args, device: str) -> dict:
             all_advantages.append((r - mean) / std)
     losses = completion_loss(model, tokenizer, all_prompts, all_completions, device)
     advantages = torch.tensor(all_advantages, dtype=torch.float32, device=device).clamp(-3, 3)
-    objective = (advantages.detach() * losses).mean() + args.kl_coef * losses.mean()
+    objective = (advantages.detach() * losses).mean()
     return {
         "loss": objective,
         "mean_reward": sum(rewards) / len(rewards),
@@ -117,7 +125,6 @@ def main():
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--temperature", type=float, default=0.9)
     parser.add_argument("--learning-rate", type=float, default=2e-6)
-    parser.add_argument("--kl-coef", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=17)
     args = parser.parse_args()
 
