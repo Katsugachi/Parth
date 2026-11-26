@@ -10,6 +10,8 @@ from huggingface_hub import HfApi
 def write_model_card(model_dir: str | Path, report_path: str | Path, repo_id: str):
     model_dir = Path(model_dir)
     report = json.loads(Path(report_path).read_text())
+    if report.get("evaluation_mode", "full") != "full" or report.get("intelligence_index") is None:
+        raise ValueError("publish requires a complete full evaluation report, not a limited smoke-test report")
     scores = report.get("scores", {})
     table = "\n".join(f"| {name} | {value:.2f} |" for name, value in sorted(scores.items()))
     card = f"""---
