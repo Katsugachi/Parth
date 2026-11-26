@@ -8,7 +8,7 @@ Parth is a from-scratch 337M-parameter small language model pipeline targeting t
 - Bounded local parquet caching (`parth/data.py`) for OpenBMB Ultra-FineWeb, OpenBMB UltraData-Math, FineWeb-Edu, and SmolTalk, plus fresh synthetic arithmetic and Qwenputer-inspired tiny-CPU execution traces.
 - Stock Hugging Face Llama export (`parth/export_hf.py`) so leaderboard evaluation uses standard continuation log-likelihood scoring.
 - Open SLM evaluation (`parth/evaluate.py`): zero-shot ARC-Easy/ARC-Challenge/HellaSwag/PIQA through LM-eval and official ArithMark-3 script.
-- GRPO-style exact-reward post-training (`parth/rl_posttrain.py`), self-consistency test-time compute (`parth/ttc.py`), and validation-guarded direct weight editing (`parth/weight_editing.py`).
+- GRPO-style exact-reward post-training (`parth/rl_posttrain.py`), self-consistency test-time compute (`parth/ttc.py`), and validation-guarded direct weight editing (`parth/apply_weight_edits.py`, utilities in `parth/weight_editing.py`).
 - Manual fluency sample generation (`parth/manual_chat.py`) and auditable Hugging Face publishing (`parth/publish_hf.py`).
 
 ## Important scope note
@@ -23,7 +23,8 @@ python -m pytest tests
 python -m parth.train_tpu --total-tokens 8000000000 --max-hours 8.25
 python -m parth.export_hf /path/to/parth_weights_step_XXXXXXXX.safetensors exported/parth
 python -m parth.evaluate exported/parth results/open-slm --device cuda
-python -m parth.manual_chat exported/parth results/manual
+python -m parth.apply_weight_edits exported/parth edited/parth
+python -m parth.manual_chat edited/parth results/manual
 ```
 
 Kaggle TPU pushes are automated by `scripts/kaggle_push.py`; the training commit must be pushed to GitHub first.
