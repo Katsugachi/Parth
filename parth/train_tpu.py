@@ -355,6 +355,11 @@ def train(args):
     )
     started = time.time()
     devices = jax.devices()
+    if args.require_tpu and (devices[0].platform != "tpu" or len(devices) < args.min_tpu_devices):
+        raise RuntimeError(
+            f"TPU training requested but jax sees {len(devices)} {devices[0].platform} device(s); "
+            "refusing to spend a queued session on CPU fallback"
+        )
     mesh = jax.sharding.Mesh(np.asarray(devices), ("data",))
     replicated = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
     sharded = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
@@ -496,6 +501,8 @@ def parse_args():
     parser.add_argument("--download-workers", type=int, default=8)
     parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto")
     parser.add_argument("--loss-scale", type=float, default=256.0)
+    parser.add_argument("--require-tpu", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--min-tpu-devices", type=int, default=8)
     return parser.parse_args()
 
 
